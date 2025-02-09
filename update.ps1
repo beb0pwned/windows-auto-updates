@@ -26,14 +26,14 @@ function Update-Windows {
 
 }
 
-function Update-MicrosoftStore {
+function Update-Apps {
     Write-Host "Checking for MS Store Updates..." -ForegroundColor Cyan
     winget upgrade --all --accept-source-agreements --accept-package-agreements
 } 
 
 
 Update-Windows
-Update-MicrosoftStore
+Update-Apps
 
 Set-ExecutionPolicy Restricted -Confirm:$false -Force
 
