@@ -1,29 +1,49 @@
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 function Update-Windows {
-    Write-Host "Installing Dependencies..." -ForegroundColor Cyan
+    Write-Host "Initializing Windows Update search..." -ForegroundColor Cyan
 
-    Write-Host "Installing NuGet..." -ForegroundColor Cyan
-    if (-not (Get-Module -ListAvailable -Name NuGet)) {
-        Install-PackageProvider -Name NuGet -Force -Confirm:$false
-        Install-Module -Name NuGet -Force -Confirm:$false
-        Write-Host "Successfully Installed NuGet! Continuing Updates..." -ForegroundColor Magenta
+    $NoPatches = $false
+    $Criteria = "IsInstalled=0"
+
+    $Searcher = New-Object -ComObject Microsoft.Update.Searcher
+    $searchResult = $Searcher.Search($Criteria).Updates
+    Write-Host "Searching for applicable updates..." -ForegroundColor Cyan
+    # Search for updates that are not installed
+
+    if ($searchResult.Updates.Count -eq 0) {
+        Write-Host "No new updates found." -ForegroundColor Green
     }
 
+    if ($searchResult.count -gt 0) {
+        foreach($item in $searchResult) {
+            Write-Host "Preparing to install" $item.Title -ForegroundColor Yellow
+        }
+    } 
     else {
-        Write-Host "NuGet is already installed. Continuing Updates..." -ForegroundColor Magenta
+        $NoPatches = $true
     }
 
-    Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-    Write-Host "Checking for Windows Updates..." -ForegroundColor Cyan
-    if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate )) {
-        Install-Module -Name PSWindowsUpdate -Force -Confirm:$false -SkipPublisherCheck
+    if($NoPatches -eq $false) {
+        $Session = New-Object -ComObject Microsoft.Update.Session
+        $Downloader = $Session.CreateUpdateDownloader()
+        $Downloader.Updates = $SearchResult
+        $DownloadResult = $Downloader.Download()
+
+        #Install updates
+        $Installer = New-Object -ComObject Microsoft.Update.Installer
+        $Installer.Updates = $SearchResult
+        $InstallResult = $Installer.Install()
+
+        if($InstallResult.HResult -eq 0)
+        {
+            Write-Host "Patches installed successfully" -ForegroundColor Green
+        }
+        else
+        {
+            Write-Host "Patches failed to install with error code" $InstallResult.HResult -ForegroundColor Red
+        }
     }
-    
-    Get-WindowsUpdate -Install -AcceptAll -AutoReboot
-    Write-Host "Windows Updates completed!" -ForegroundColor Cyan
-
-
 }
 
 function Update-Apps {
@@ -38,5 +58,5 @@ Update-Apps
 Set-ExecutionPolicy Restricted -Confirm:$false -Force
 
 Write-Host "Remember to restart device to complete updates!" -ForegroundColor Magenta
-Write-Host ""
+Write-Host
 Write-Host "Finished Updates!" -ForegroundColor Green
