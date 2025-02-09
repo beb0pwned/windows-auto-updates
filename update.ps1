@@ -4,7 +4,7 @@ function Update-Windows {
     Write-Host "Initializing Windows Update search..." -ForegroundColor Cyan
 
     $NoPatches = $false
-    $Criteria = "IsInstalled=0"
+    $Criteria = "IsInstalled=0 or IsHidden=0"
 
     $Searcher = New-Object -ComObject Microsoft.Update.Searcher
     $searchResult = $Searcher.Search($Criteria).Updates
