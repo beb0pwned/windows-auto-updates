@@ -5,8 +5,8 @@ function Update-Windows {
 
     Write-Host "Installing NuGet..." -ForegroundColor Cyan
     if (-not (Get-Module -ListAvailable -Name NuGet)) {
+        Install-PackageProvider -Name NuGet -Force -Confirm:$false
         Install-Module -Name NuGet -Force -Confirm:$false
-        Install-PackageProvider -Name NuGet -ForceBootstrap -Force
         Write-Host "Successfully Installed NuGet! Continuing Updates..." -ForegroundColor Magenta
     }
 
