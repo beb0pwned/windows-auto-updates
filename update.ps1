@@ -9,8 +9,8 @@ function Update-Windows {
     $Searcher = New-Object -ComObject Microsoft.Update.Searcher
     $searchResult = $Searcher.Search($Criteria).Updates
     Write-Host "Searching for applicable updates..." -ForegroundColor Cyan
+    
     # Search for updates that are not installed
-
     if ($searchResult.Updates.Count -eq 0) {
         Write-Host "No new updates found." -ForegroundColor Green
     }
@@ -50,7 +50,6 @@ function Update-Apps {
     Write-Host "Checking for MS Store Updates..." -ForegroundColor Cyan
     winget upgrade --all --accept-source-agreements --accept-package-agreements
 } 
-
 
 Update-Windows
 Update-Apps
