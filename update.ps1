@@ -1,143 +1,82 @@
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-[console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-$ANSIColors = @{
-    'Reset' = "`e[0m"
-    'Red' = "`e[31m"
-    'Green' = "`e[32m"
-    'Yellow' = "`e[33m"
-    'Magenta' = "`e[35m"
-    'Cyan' = "`e[36m"
-}
-
-function Write-ColoredOutput {
-    param (
-        [Parameter(Mandatory)]
-        [string]$Message,
-
-        [Parameter(Mandatory)]
-        [ValidateSet('Red', 'Green', 'Yellow', 'Magenta', 'Cyan')]
-        [string]$Color
-    )
-
-    $colorCode = $ANSIColors[$Color]
-    $resetCode = $ANSIColors['Reset']
-    Write-Output "$colorCode $Message$resetCode"
-}
-
-
-Add-Type -TypeDefinition @"
-using System.Collections.Concurrent;
-"@
-
-$outputQueue = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
-
-$runspacePool = [runspaceFactory]::CreateRunspacePool(1, [Environment]::ProcessorCount)
-$runspacePool.Open()
-
-# Windows Updates Runspace
-$runspace1 = [powershell]::Create().AddScript({
-    param ($queue)
+$runspace1Script = {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
     function Update-Windows {
-        $queue.Enqueue("[INFO] Initializing Windows Update search...|Cyan")
+        Write-Host "[INFO] Initializing Windows Update search..." -ForegroundColor Cyan
 
         $NoPatches = $false
         $Criteria = "IsInstalled=0 or IsHidden=0"
 
         $Searcher = New-Object -ComObject Microsoft.Update.Searcher
         $searchResult = $Searcher.Search($Criteria).Updates
-        $queue.Enqueue("[INFO] Searching for applicable updates...|Cyan")
-        # Search for updates that are not installed
+        Write-Host "[INFO] Searching for applicable updates..." -ForegroundColor Cyan
 
-        if ($searchResult.Updates.Count -eq 0) {
-            $queue.Enqueue("[WARNING] No new updates found.|Yellow")
+        if ($searchResult.Count -eq 0) {
+            Write-Host "[WARNING] No new updates found." -ForegroundColor Yellow
             return
         }
 
-        if ($searchResult.count -gt 0) {
-            foreach($update in $searchResult) {
-                $queue.Enqueue("[UPDATE] Installing: $($update.Title)|Magenta")
+        if ($searchResult.Count -gt 0) {
+            foreach ($update in $searchResult) {
+                Write-Host "[UPDATE] Installing: $($update.Title)" -ForegroundColor Magenta
             }
-        } 
-        else {
+        } else {
             $NoPatches = $true
         }
 
-        if($NoPatches -eq $false) {
+        if (-not $NoPatches) {
             $Session = New-Object -ComObject Microsoft.Update.Session
             $Downloader = $Session.CreateUpdateDownloader()
-            $Downloader.Updates = $SearchResult
+            $Downloader.Updates = $searchResult
             $DownloadResult = $Downloader.Download()
 
-            #Install updates
             $Installer = New-Object -ComObject Microsoft.Update.Installer
-            $Installer.Updates = $SearchResult
+            $Installer.Updates = $searchResult
             $InstallResult = $Installer.Install()
 
-            if($InstallResult.HResult -eq 0)
-            {
-                $queue.Enqueue("[SUCCESS] Patches installed successfully|Green")
-            }
-            else
-            {
-                $queue.Enqueue("[ERROR] Patches failed to install with error code $($InstallResult.HResult)|Red")
+            if ($InstallResult.HResult -eq 0) {
+                Write-Host "[SUCCESS] Updates installed successfully!" -ForegroundColor Green
+            } else {
+                Write-Host "[ERROR] Updates failed to install with error code $($InstallResult.HResult)" -ForegroundColor Red
             }
         }
     }
+
     Update-Windows
-}).AddArgument($outputQueue)
-$runspace1.RunspacePool = $runspacePool
-$runspace1Output = $runspace1.BeginInvoke()
+    Write-Host "[INFO] You may now close this window." -ForegroundColor Cyan 
+}
 
-# App Updates Runspace
-$runspace2 = [powershell]::Create().Addscript({
-    param ($queue)
-
+# Path to the script or commands for the second runspace
+$runspace2Script = {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     function Update-Apps {
-        $queue.Enqueue("[INFO] Checking for Microsoft Store app updates...|Cyan")
+        Write-Host "[INFO] Checking for Microsoft Store app updates..." -ForegroundColor Cyan
+        winget upgrade --source msstore --all --accept-source-agreements --accept-package-agreements
         winget upgrade --all --accept-source-agreements --accept-package-agreements
+
+        Write-Host "[SUCCESS] Completed all App updates!" -ForegroundColor Green
     }
     Update-Apps
-}).AddArgument($outputQueue)
-$runspace2.RunspacePool = $runspacePool
-$runspace2Output = $runspace2.BeginInvoke()
-
-function Process-Queue {
-    param (
-        [Parameter(Mandatory)]
-        [System.Collections.Concurrent.ConcurrentQueue[string]]$Queue
-    )
-    $line = $null
-    while ($Queue.TryDequeue([ref]$line)) {
-        $parts = $line -split '\|'
-        $message = $parts[0]
-        $color = $parts[1]
-        Write-ColoredOutput -Message $message -Color $color
-    }
+    Write-Host "[INFO] You may now close this window." -ForegroundColor Cyan
 }
 
+# Write scripts to temp files
+$runspace1File = [System.IO.Path]::GetTempFileName() + ".ps1"
+$runspace2File = [System.IO.Path]::GetTempFileName() + ".ps1"
+Set-Content -Path $runspace1File -Value ($runspace1Script | Out-String)
+Set-Content -Path $runspace2File -Value ($runspace2Script | Out-String)
 
-while (-not ($runspace1Output.IsCompleted -and $runspace2Output.IsCompleted)) {
-    Process-Queue -Queue $outputQueue
-    Start-Sleep -Milliseconds 500
+# Start new terminals for each runspace
+Start-Process -FilePath "powershell.exe" -ArgumentList "-NoExit", "-File", $runspace1File
+Start-Process -FilePath "powershell.exe" -ArgumentList "-NoExit", "-File", $runspace2File
+
+Set-ExecutionPolicy Restricted -Force -Confirm:$false
+
+if ($runspace1Script.IsCompleted -and $runspace2Script.IsCompleted) {
+    Write-Host "[WARNING] Restart device to complete updates." -ForegroundColor Yellow
+    Write-Host 
+    Write-Host "Updates Complete!" -ForegroundColor Green
+    Remove-Item -Path $runspace1File, $runspace2File -Force
 }
-
-
-Process-Queue -Queue $outputQueue
-
-
-
-# Collect Outs
-$runspace1.EndInvoke($runspace1Output)
-$runspace2.EndInvoke($runspace2Output)
-
-$runspace1.Dispose()
-$runspace2.Dispose()
-$runspacePool.Close()
-
-Set-ExecutionPolicy Restricted -Confirm:$false -Force
-
-Write-Host "Remember to restart device to complete updates." -ForegroundColor Magenta
-
-Write-Host "Finished Updates!" -ForegroundColor Green
