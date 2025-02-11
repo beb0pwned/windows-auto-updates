@@ -30,7 +30,6 @@ $runspace1Script = {
             $Session = New-Object -ComObject Microsoft.Update.Session
             $Downloader = $Session.CreateUpdateDownloader()
             $Downloader.Updates = $searchResult
-            $DownloadResult = $Downloader.Download()
 
             $Installer = New-Object -ComObject Microsoft.Update.Installer
             $Installer.Updates = $searchResult
@@ -63,8 +62,9 @@ $runspace2Script = {
 }
 
 # Write scripts to temp files
-$runspace1File = [System.IO.Path]::GetTempFileName() + ".ps1"
-$runspace2File = [System.IO.Path]::GetTempFileName() + ".ps1"
+$TempFile = $env:TEMP
+$runspace1File = "$TempFile\win-updates.ps1"
+$runspace2File = "$TempFile\app-updates.ps1"
 Set-Content -Path $runspace1File -Value ($runspace1Script | Out-String)
 Set-Content -Path $runspace2File -Value ($runspace2Script | Out-String)
 
@@ -72,11 +72,18 @@ Set-Content -Path $runspace2File -Value ($runspace2Script | Out-String)
 Start-Process -FilePath "powershell.exe" -ArgumentList "-NoExit", "-File", $runspace1File
 Start-Process -FilePath "powershell.exe" -ArgumentList "-NoExit", "-File", $runspace2File
 
-Set-ExecutionPolicy Restricted -Force -Confirm:$false
+$job1 = Start-Job -ScriptBlock ([scriptblock]::Create((Get-Content $runspace1File -Raw)))
+$job2 = Start-Job -ScriptBlock ([scriptblock]::Create((Get-Content $runspace2File -Raw)))
 
-if ($runspace1Script.IsCompleted -and $runspace2Script.IsCompleted) {
-    Write-Host "[WARNING] Restart device to complete updates." -ForegroundColor Yellow
-    Write-Host 
-    Write-Host "Updates Complete!" -ForegroundColor Green
-    Remove-Item -Path $runspace1File, $runspace2File -Force
-}
+Write-Host "[INFO] Waiting for updates to complete..." -ForegroundColor Cyan
+Wait-Job -Job $job1, $job2
+
+
+Remove-Job -Job $job1, $job2
+Remove-Item -Path $runspace1File, $runspace2File -Force
+
+
+Write-Host "[WARNING] Restart device to complete updates." -ForegroundColor Yellow
+Write-Host 
+Write-Host "Updates Complete!" -ForegroundColor Green
+Set-ExecutionPolicy Restricted -Force -Confirm:$false -Scope CurrentUser
